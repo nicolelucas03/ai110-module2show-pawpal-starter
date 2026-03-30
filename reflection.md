@@ -2,15 +2,26 @@
 
 ## 1. System Design
 
+### Core Actions 
+1. User should track walks, feedings, meds, and enrichment. 
+2. User should be able to produce a daily plan. 
+3. User should enter fields such as owner and pet information.
+4. User can edit and add tasks. 
+
 **a. Initial design**
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+My initial design was quite simple. Included objects such as Pet, Owner, Schedule, and Task. The Pet class included attributes such as name, species, and age. The Owner class included name, time availability, and preferences. Schedule included methods such as calculateDuration() and isCompleted() and attributes such as start_time and end_time. Task included methods such as addTask, updateTask,  and deleteTask. 
+
+
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
+
+After consulting and brainstorming with Copilot, I realized that my classes were a bit vague and I needed to rename some classes for multi-use purposes. There were also some missing relationships, such as Pet class storing owner_id, CareTask storing pet_id, and ScheduleItem storing CareTask reference. ScheduleItem was changed to use objects instead of strings for start_time and end_time variables. Overall, the improvements suggested were to make my classes more descriptive and robust.
 
 ---
 
