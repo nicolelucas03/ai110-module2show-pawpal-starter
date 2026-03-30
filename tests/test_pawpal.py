@@ -292,3 +292,114 @@ def test_add_item_with_warning_does_not_raise_on_overlap() -> None:
 	assert warning is not None
 	assert "overlaps with" in warning
 	assert len(plan.schedule_items) == 1
+
+
+def test_sorting_correctness_returns_chronological_order() -> None:
+	scheduler = Scheduler()
+	tasks = [
+		CareTask(
+			task_id="chron_1",
+			pet_id="p1",
+			title="Late",
+			category="care",
+			duration_min=10,
+			priority=3,
+			is_required=True,
+			time="18:30",
+		),
+		CareTask(
+			task_id="chron_2",
+			pet_id="p1",
+			title="Early",
+			category="care",
+			duration_min=10,
+			priority=3,
+			is_required=True,
+			time="07:15",
+		),
+		CareTask(
+			task_id="chron_3",
+			pet_id="p1",
+			title="Middle",
+			category="care",
+			duration_min=10,
+			priority=3,
+			is_required=True,
+			time="12:00",
+		),
+	]
+
+	ranked = scheduler.rank_tasks(tasks)
+
+	assert [task.time for task in ranked] == ["07:15", "12:00", "18:30"]
+
+
+def test_recurrence_logic_daily_creates_task_for_following_day() -> None:
+	task_repo = TaskRepository()
+	scheduler = Scheduler()
+	task = CareTask(
+		task_id="daily_med",
+		pet_id="p1",
+		title="Daily Meds",
+		category="health",
+		duration_min=5,
+		priority=5,
+		is_required=True,
+		time="08:00",
+		recurrence="daily",
+	)
+	task_repo.add_task(task)
+
+	item = ScheduleItem(
+		task_id=task.task_id,
+		task=task,
+		start_time=datetime(2026, 3, 30, 8, 0),
+		end_time=datetime(2026, 3, 30, 8, 5),
+	)
+
+	next_task = scheduler.complete_schedule_item(item, task_repo)
+
+	assert next_task is not None
+	assert "20260331_0800" in next_task.task_id
+	assert next_task.time == "08:00"
+
+
+def test_conflict_detection_flags_duplicate_times() -> None:
+	scheduler = Scheduler()
+	task1 = CareTask(
+		task_id="dup_1",
+		pet_id="p1",
+		title="Breakfast",
+		category="care",
+		duration_min=15,
+		priority=4,
+		is_required=True,
+	)
+	task2 = CareTask(
+		task_id="dup_2",
+		pet_id="p1",
+		title="Medication",
+		category="health",
+		duration_min=10,
+		priority=5,
+		is_required=True,
+	)
+
+	# Exact same start and end times represent a duplicate-time conflict.
+	item1 = ScheduleItem(
+		task_id=task1.task_id,
+		task=task1,
+		start_time=datetime(2026, 3, 30, 10, 0),
+		end_time=datetime(2026, 3, 30, 10, 15),
+	)
+	item2 = ScheduleItem(
+		task_id=task2.task_id,
+		task=task2,
+		start_time=datetime(2026, 3, 30, 10, 0),
+		end_time=datetime(2026, 3, 30, 10, 15),
+	)
+
+	warnings = scheduler.detect_conflicts([item1, item2], "p1")
+
+	assert len(warnings) == 1
+	assert "Time conflict" in warnings[0]
