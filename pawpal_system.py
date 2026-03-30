@@ -71,6 +71,8 @@ class CareTask:
     priority: int  # Valid range: 1-5 (1=low, 5=critical)
     is_required: bool
     preferred_time_window: Optional[str] = None
+    time: Optional[str] = None  # Optional HH:MM preferred start time
+    recurrence: Optional[str] = None  # None, daily, or weekly
 
     def __post_init__(self):
         """Validate priority bounds after initialization."""
@@ -78,6 +80,13 @@ class CareTask:
             raise ValueError("Priority must be between 1 (low) and 5 (critical)")
         if self.duration_min <= 0:
             raise ValueError("Duration must be positive")
+        if self.time is not None:
+            try:
+                datetime.strptime(self.time, "%H:%M")
+            except ValueError as exc:
+                raise ValueError("Task time must be in HH:MM format") from exc
+        if self.recurrence is not None and self.recurrence not in {"daily", "weekly"}:
+            raise ValueError("Recurrence must be 'daily', 'weekly', or None")
 
     """Return True when this task's priority is 4 or higher."""
     def is_high_priority(self) -> bool:
@@ -225,13 +234,67 @@ class Scheduler:
 
     def rank_tasks(self, tasks: List[CareTask]) -> List[CareTask]:
         """Rank tasks based on priority and constraints."""
-        # Sort by: required first, then by priority (descending)
+        # Sort by: required first, then earliest explicit time, then priority (descending)
+        def parse_time_key(time_str: Optional[str]) -> tuple[int, int]:
+            if time_str is None:
+                return (99, 99)
+            hour, minute = map(int, time_str.split(":"))
+            return (hour, minute)
+
         ranked = sorted(
             tasks,
-            key=lambda t: (-int(t.is_required), -t.priority),
+            key=lambda t: (-int(t.is_required), parse_time_key(t.time), -t.priority),
             reverse=False
         )
         return ranked
+
+    def detect_conflicts(self, schedule_items: List[ScheduleItem], pet_id: str) -> List[str]:
+        """Return non-fatal warning messages for overlapping tasks for a pet."""
+        pet_items = [item for item in schedule_items if item.task.pet_id == pet_id]
+        ordered_items = sorted(pet_items, key=lambda item: item.start_time)
+        warnings: List[str] = []
+
+        for index in range(1, len(ordered_items)):
+            previous = ordered_items[index - 1]
+            current = ordered_items[index]
+            if current.start_time < previous.end_time:
+                warnings.append(
+                    "⚠️ Time conflict for pet "
+                    f"{current.task.pet_id}: '{previous.task.title}' "
+                    f"({previous.start_time.strftime('%H:%M')}-{previous.end_time.strftime('%H:%M')}) "
+                    f"overlaps with '{current.task.title}' "
+                    f"({current.start_time.strftime('%H:%M')}-{current.end_time.strftime('%H:%M')})."
+                )
+
+        return warnings
+
+    def add_item_with_warning(self, plan: DailyPlan, schedule_item: ScheduleItem) -> Optional[str]:
+        """Try to add a schedule item and return a warning instead of raising."""
+        conflict_item = self._find_conflicting_item(plan.schedule_items, schedule_item)
+        if conflict_item is not None:
+            return (
+                f"⚠️ Skipped '{schedule_item.task.title}': overlaps with "
+                f"'{conflict_item.task.title}' "
+                f"({conflict_item.start_time.strftime('%H:%M')}-{conflict_item.end_time.strftime('%H:%M')})."
+            )
+
+        try:
+            plan.add_item(schedule_item)
+            return None
+        except ValueError as exc:
+            return f"⚠️ Skipped '{schedule_item.task.title}': {str(exc)}"
+
+    def _find_conflicting_item(
+        self,
+        existing_items: List[ScheduleItem],
+        candidate: ScheduleItem,
+    ) -> Optional[ScheduleItem]:
+        """Return the first overlapping schedule item, if any."""
+        for existing in existing_items:
+            if not (candidate.end_time <= existing.start_time or candidate.start_time >= existing.end_time):
+                if existing.task.pet_id == candidate.task.pet_id:
+                    return existing
+        return None
 
     def build_plan(
         self,
@@ -272,15 +335,15 @@ class Scheduler:
                     status="pending"
                 )
                 
-                try:
-                    plan.add_item(schedule_item)
+                warning = self.add_item_with_warning(plan, schedule_item)
+                if warning is None:
                     scheduled_items.append(schedule_item)
                     plan.explanation_notes.append(
                         f"Scheduled '{task.title}' (priority {task.priority}, {task.duration_min}min)"
                     )
                     current_time = end_time
-                except ValueError as e:
-                    plan.explanation_notes.append(f"Skipped '{task.title}': {str(e)}")
+                else:
+                    plan.explanation_notes.append(warning)
             else:
                 if task.is_required:
                     plan.explanation_notes.append(
@@ -319,6 +382,58 @@ class Scheduler:
             all_tasks.extend(tasks)
         return all_tasks
 
+    def complete_schedule_item(
+        self,
+        schedule_item: ScheduleItem,
+        task_repo: 'TaskRepository',
+    ) -> Optional[CareTask]:
+        """Mark an item complete and create next daily/weekly task instance when needed."""
+        schedule_item.mark_complete()
+        recurrence = schedule_item.task.recurrence
+
+        if recurrence not in {"daily", "weekly"}:
+            return None
+
+        days_to_add = 1 if recurrence == "daily" else 7
+        next_start = schedule_item.start_time + timedelta(days=days_to_add)
+        new_task_id = self._build_next_recurring_task_id(
+            schedule_item.task.task_id,
+            next_start,
+            task_repo,
+        )
+
+        next_task = CareTask(
+            task_id=new_task_id,
+            pet_id=schedule_item.task.pet_id,
+            title=schedule_item.task.title,
+            category=schedule_item.task.category,
+            duration_min=schedule_item.task.duration_min,
+            priority=schedule_item.task.priority,
+            is_required=schedule_item.task.is_required,
+            preferred_time_window=schedule_item.task.preferred_time_window,
+            time=next_start.strftime("%H:%M"),
+            recurrence=recurrence,
+        )
+        task_repo.add_task(next_task)
+        return next_task
+
+    def _build_next_recurring_task_id(
+        self,
+        base_task_id: str,
+        next_start: datetime,
+        task_repo: 'TaskRepository',
+    ) -> str:
+        """Build a unique ID for the next recurring task instance."""
+        base_candidate = f"{base_task_id}_{next_start.strftime('%Y%m%d_%H%M')}"
+        candidate = base_candidate
+        counter = 1
+
+        while task_repo.get_task_by_id(candidate) is not None:
+            candidate = f"{base_candidate}_{counter}"
+            counter += 1
+
+        return candidate
+
 
 class TaskRepository:
     """Manages storage and retrieval of care tasks."""
@@ -355,6 +470,20 @@ class TaskRepository:
     def get_tasks_by_pet(self, pet_id: str) -> List[CareTask]:
         """Retrieve all tasks for a specific pet."""
         return [task for task in self.tasks.values() if task.pet_id == pet_id]
+
+    def get_tasks_by_pet_name(self, pet_name: str, pet_repo: 'PetRepository') -> List[CareTask]:
+        """Retrieve all tasks for pets matching a given name (case-insensitive)."""
+        normalized_name = pet_name.strip().lower()
+        if not normalized_name:
+            raise ValueError("Pet name cannot be empty")
+
+        matching_pet_ids = {
+            pet.pet_id
+            for pet in pet_repo.get_all_pets()
+            if pet.name.strip().lower() == normalized_name
+        }
+
+        return [task for task in self.tasks.values() if task.pet_id in matching_pet_ids]
 
     def get_tasks_by_category(self, category: str) -> List[CareTask]:
         """Retrieve all tasks in a specific category."""

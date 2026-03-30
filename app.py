@@ -1,4 +1,15 @@
 import streamlit as st
+from datetime import datetime
+
+from pawpal_system import (
+    Owner,
+    Pet,
+    CareTask,
+    DailyConstraints,
+    Scheduler,
+    TaskRepository,
+    PetRepository,
+)
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -38,51 +49,136 @@ At minimum, your system should:
 
 st.divider()
 
-st.subheader("Quick Demo Inputs (UI only)")
-owner_name = st.text_input("Owner name", value="Jordan")
-pet_name = st.text_input("Pet name", value="Mochi")
-species = st.selectbox("Species", ["dog", "cat", "other"])
+# Initialize session state repositories and objects
+if "pet_repo" not in st.session_state:
+    st.session_state.pet_repo = PetRepository()
+    st.session_state.task_repo = TaskRepository()
+    st.session_state.scheduler = Scheduler()
+    st.session_state.owner = None
+    st.session_state.current_pet = None
 
-st.markdown("### Tasks")
-st.caption("Add a few tasks. In your final version, these should feed into your scheduler.")
+# ===== CREATE OWNER =====
+st.subheader("Owner Information")
+owner_name = st.text_input("Owner name", value="Jordan", key="owner_name_input")
+daily_time_available = st.number_input(
+    "Available time daily (minutes)", min_value=30, max_value=480, value=120
+)
 
-if "tasks" not in st.session_state:
-    st.session_state.tasks = []
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    task_title = st.text_input("Task title", value="Morning walk")
-with col2:
-    duration = st.number_input("Duration (minutes)", min_value=1, max_value=240, value=20)
-with col3:
-    priority = st.selectbox("Priority", ["low", "medium", "high"], index=2)
-
-if st.button("Add task"):
-    st.session_state.tasks.append(
-        {"title": task_title, "duration_minutes": int(duration), "priority": priority}
+if st.button("Create/Update Owner", key="create_owner_btn"):
+    st.session_state.owner = Owner(
+        owner_id="owner_001",
+        name=owner_name,
+        daily_time_available_min=int(daily_time_available),
     )
+    st.success(f"✅ Owner '{owner_name}' created with {daily_time_available} min/day available")
 
-if st.session_state.tasks:
-    st.write("Current tasks:")
-    st.table(st.session_state.tasks)
-else:
-    st.info("No tasks yet. Add one above.")
-
+# ===== CREATE PET =====
 st.divider()
+st.subheader("Add a Pet")
 
-st.subheader("Build Schedule")
-st.caption("This button should call your scheduling logic once you implement it.")
+if st.session_state.owner:
+    pet_name = st.text_input("Pet name", value="Mochi", key="pet_name_input")
+    species = st.selectbox("Species", ["dog", "cat", "bird", "rabbit", "other"], key="species_select")
+    age = st.number_input("Age (years)", min_value=0, max_value=30, value=3)
+    
+    if st.button("Add Pet", key="add_pet_btn"):
+        pet = Pet(
+            pet_id=f"pet_{len(st.session_state.pet_repo.get_all_pets()) + 1:03d}",
+            owner_id=st.session_state.owner.owner_id,
+            name=pet_name,
+            species=species,
+            age_years=int(age),
+        )
+        st.session_state.pet_repo.add_pet(pet)
+        st.session_state.current_pet = pet
+        st.success(f"✅ Pet '{pet_name}' added!")
+else:
+    st.info("👈 Create an owner first!")
 
-if st.button("Generate schedule"):
-    st.warning(
-        "Not implemented yet. Next step: create your scheduling logic (classes/functions) and call it here."
-    )
-    st.markdown(
-        """
-Suggested approach:
-1. Design your UML (draft).
-2. Create class stubs (no logic).
-3. Implement scheduling behavior.
-4. Connect your scheduler here and display results.
-"""
-    )
+# ===== ADD TASKS =====
+st.divider()
+st.subheader("Add Care Tasks")
+
+if st.session_state.owner and st.session_state.current_pet:
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        task_title = st.text_input("Task title", value="Morning walk", key="task_title_input")
+    with col2:
+        duration = st.number_input("Duration (min)", min_value=1, max_value=240, value=30, key="duration_input")
+    with col3:
+        category = st.selectbox(
+            "Category",
+            ["exercise", "feeding", "grooming", "play", "care", "health", "other"],
+            key="category_select"
+        )
+    with col4:
+        priority = st.selectbox("Priority", [1, 2, 3, 4, 5], format_func=lambda x: f"{x} - {['Low', 'Medium', 'High', 'Critical', 'Critical'][x-1]}", key="priority_select")
+    
+    is_required = st.checkbox("Required task?", value=False, key="required_checkbox")
+    
+    if st.button("Add Task", key="add_task_btn"):
+        task = CareTask(
+            task_id=f"task_{len(st.session_state.task_repo.get_all_tasks()) + 1:03d}",
+            pet_id=st.session_state.current_pet.pet_id,
+            title=task_title,
+            category=category,
+            duration_min=int(duration),
+            priority=int(priority),
+            is_required=bool(is_required),
+        )
+        st.session_state.task_repo.add_task(task)
+        st.session_state.current_pet.add_task(task)
+        st.success(f"✅ Task '{task_title}' added!")
+    
+    # Display current pet's tasks
+    if st.session_state.current_pet.task_count() > 0:
+        st.markdown("### Current Tasks")
+        tasks_data = [
+            {
+                "Title": t.title,
+                "Duration": f"{t.duration_min}min",
+                "Priority": t.priority,
+                "Required": "Yes" if t.is_required else "No",
+                "Category": t.category,
+            }
+            for t in st.session_state.current_pet.tasks
+        ]
+        st.table(tasks_data)
+else:
+    st.info("👈 Create an owner and pet first!")
+
+# ===== GENERATE SCHEDULE =====
+st.divider()
+st.subheader("Generate Daily Schedule")
+
+if st.session_state.owner and st.session_state.current_pet and st.session_state.current_pet.task_count() > 0:
+    if st.button("Generate Schedule", key="generate_schedule_btn"):
+        # Create daily constraints
+        today = datetime.now().strftime("%Y-%m-%d")
+        constraints = DailyConstraints(
+            date=today,
+            available_time_min=st.session_state.owner.daily_time_available_min,
+        )
+        
+        # Get tasks for current pet
+        tasks = st.session_state.task_repo.get_tasks_by_pet(st.session_state.current_pet.pet_id)
+        
+        # Build the plan
+        plan = st.session_state.scheduler.build_plan(
+            owner=st.session_state.owner,
+            pet=st.session_state.current_pet,
+            tasks=tasks,
+            constraints=constraints,
+        )
+        
+        # Display the schedule
+        st.markdown(plan.summarize_plan())
+        
+        # Display reasoning
+        st.markdown("### Scheduling Reasoning")
+        explanations = st.session_state.scheduler.explain_choices(plan)
+        for explanation in explanations:
+            st.write(f"• {explanation}")
+else:
+    st.info("👈 Create an owner, pet, and at least one task first!")

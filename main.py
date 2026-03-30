@@ -70,7 +70,8 @@ def main():
         duration_min=30,
         priority=5,  # Critical
         is_required=True,
-        preferred_time_window="morning"
+        preferred_time_window="morning",
+        time="08:30"
     )
     task_repo.add_task(task1)
     
@@ -82,9 +83,36 @@ def main():
         duration_min=20,
         priority=4,  # High
         is_required=False,
-        preferred_time_window="afternoon"
+        preferred_time_window="afternoon",
+        time="14:00"
     )
     task_repo.add_task(task2)
+
+    # Added out of order on purpose to demo time-based sorting.
+    # This shares the same time as Morning Walk to demonstrate same-time tasks.
+    task5 = CareTask(
+        task_id="task_005",
+        pet_id=dog.pet_id,
+        title="Breakfast Feeding",
+        category="care",
+        duration_min=15,
+        priority=5,
+        is_required=True,
+        time="08:30"
+    )
+    task_repo.add_task(task5)
+
+    task6 = CareTask(
+        task_id="task_006",
+        pet_id=dog.pet_id,
+        title="Evening Potty Break",
+        category="care",
+        duration_min=10,
+        priority=3,
+        is_required=True,
+        time="18:00"
+    )
+    task_repo.add_task(task6)
     
     # ===== Create Task for Luna (Cat) =====
     task3 = CareTask(
@@ -175,6 +203,25 @@ def main():
     # Get required tasks
     required_tasks = task_repo.get_required_tasks(dog.pet_id)
     print(f"Required tasks for {dog.name}: {', '.join(t.title for t in required_tasks)}")
+
+    # ===== New Sorting + Filtering Demo =====
+    print("\n🧪 SORTING + FILTERING DEMO:\n")
+
+    # Intentionally unsorted list by time.
+    dog_tasks_unsorted = task_repo.get_tasks_by_pet(dog.pet_id)
+    print(f"Unsorted tasks for {dog.name} (in insertion order):")
+    for t in dog_tasks_unsorted:
+        print(f"  • {t.title} @ {t.time or 'No time'} | Required={t.is_required} | Priority={t.priority}")
+
+    print(f"\nSorted tasks for {dog.name} (required -> time -> priority):")
+    dog_tasks_sorted = scheduler.rank_tasks(dog_tasks_unsorted)
+    for t in dog_tasks_sorted:
+        print(f"  • {t.title} @ {t.time or 'No time'} | Required={t.is_required} | Priority={t.priority}")
+
+    print("\nFiltered tasks by pet name 'Max':")
+    max_tasks = task_repo.get_tasks_by_pet_name("Max", pet_repo)
+    for t in max_tasks:
+        print(f"  • {t.title} ({t.category}) @ {t.time or 'No time'}")
     
     print("\n✅ Demo complete!\n")
 

@@ -29,13 +29,21 @@ After consulting and brainstorming with Copilot, I realized that my classes were
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler currently considers several practical constraints:
+
+1. Daily available minutes from the owner (`available_time_min`).
+2. Task duration (`duration_min`) so tasks only fit when enough time remains.
+3. Required vs optional tasks (`is_required`) so required care is scheduled first.
+4. Priority score (`priority`) to rank tasks with the same required status.
+5. Preferred clock time (`time` in `HH:MM`) to sort tasks earlier vs later.
+6. Time overlap detection for the same pet, which returns warnings and skips conflicting adds.
+
+I decided these constraints mattered most by focusing on pet health and realism. Required tasks and high-priority health/safety tasks should never be treated the same as optional enrichment when time is limited. After that, ordering by explicit time makes the plan easier to follow in real life. Conflict warnings are important because users need feedback without the app crashing or acting out. 
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+One tradeoff is that the scheduler uses a simple greedy strategy: it ranks tasks, then schedules in order until time runs out, instead of searching for a globally optimal schedule. This is reasonable for this scenario because pet owners need understandable behavior more than mathematical optimality. The greedy approach is easy to explain and good enough for day-to-day planning. It also keeps the system maintainable while still protecting core outcomes. 
+
 
 ---
 
