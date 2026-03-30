@@ -1,10 +1,11 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pawpal_system import (
     Owner,
     Pet,
     CareTask,
+    ScheduleItem,
     DailyConstraints,
     Scheduler,
     TaskRepository,
@@ -114,6 +115,7 @@ if st.session_state.owner and st.session_state.current_pet:
         )
     with col4:
         priority = st.selectbox("Priority", [1, 2, 3, 4, 5], format_func=lambda x: f"{x} - {['Low', 'Medium', 'High', 'Critical', 'Critical'][x-1]}", key="priority_select")
+    preferred_time = st.time_input("Preferred time", value=datetime.strptime("08:00", "%H:%M").time(), key="preferred_time_input")
     
     is_required = st.checkbox("Required task?", value=False, key="required_checkbox")
     
@@ -126,6 +128,7 @@ if st.session_state.owner and st.session_state.current_pet:
             duration_min=int(duration),
             priority=int(priority),
             is_required=bool(is_required),
+            time=preferred_time.strftime("%H:%M"),
         )
         st.session_state.task_repo.add_task(task)
         st.session_state.current_pet.add_task(task)
@@ -134,17 +137,40 @@ if st.session_state.owner and st.session_state.current_pet:
     # Display current pet's tasks
     if st.session_state.current_pet.task_count() > 0:
         st.markdown("### Current Tasks")
+        unsorted_tasks = st.session_state.task_repo.get_tasks_by_pet(st.session_state.current_pet.pet_id)
+        sorted_tasks = st.session_state.scheduler.rank_tasks(unsorted_tasks)
+
+        st.success("Tasks ranked successfully by required status, time, and priority.")
+
         tasks_data = [
             {
                 "Title": t.title,
                 "Duration": f"{t.duration_min}min",
+                "Time": t.time or "-",
                 "Priority": t.priority,
                 "Required": "Yes" if t.is_required else "No",
                 "Category": t.category,
             }
-            for t in st.session_state.current_pet.tasks
+            for t in sorted_tasks
         ]
         st.table(tasks_data)
+
+        filtered_by_name = st.session_state.task_repo.get_tasks_by_pet_name(
+            st.session_state.current_pet.name,
+            st.session_state.pet_repo,
+        )
+        st.markdown("#### Filtered By Pet Name")
+        st.table(
+            [
+                {
+                    "Pet": st.session_state.current_pet.name,
+                    "Task": t.title,
+                    "Time": t.time or "-",
+                    "Priority": t.priority,
+                }
+                for t in filtered_by_name
+            ]
+        )
 else:
     st.info("👈 Create an owner and pet first!")
 
@@ -163,12 +189,38 @@ if st.session_state.owner and st.session_state.current_pet and st.session_state.
         
         # Get tasks for current pet
         tasks = st.session_state.task_repo.get_tasks_by_pet(st.session_state.current_pet.pet_id)
+        ranked_tasks = st.session_state.scheduler.rank_tasks(tasks)
+
+        # Build pre-schedule conflict warnings based on requested task times.
+        proposed_items = []
+        for task in ranked_tasks:
+            if task.time:
+                start_time = datetime.strptime(f"{today} {task.time}", "%Y-%m-%d %H:%M")
+                proposed_items.append(
+                    ScheduleItem(
+                        task_id=task.task_id,
+                        task=task,
+                        start_time=start_time,
+                        end_time=start_time + timedelta(minutes=task.duration_min),
+                    )
+                )
+
+        pre_warnings = st.session_state.scheduler.detect_conflicts(
+            proposed_items,
+            st.session_state.current_pet.pet_id,
+        )
+
+        if pre_warnings:
+            for warning in pre_warnings:
+                st.warning(warning)
+        else:
+            st.success("No duplicate-time conflicts detected in requested task times.")
         
         # Build the plan
         plan = st.session_state.scheduler.build_plan(
             owner=st.session_state.owner,
             pet=st.session_state.current_pet,
-            tasks=tasks,
+            tasks=ranked_tasks,
             constraints=constraints,
         )
         
@@ -180,5 +232,16 @@ if st.session_state.owner and st.session_state.current_pet and st.session_state.
         explanations = st.session_state.scheduler.explain_choices(plan)
         for explanation in explanations:
             st.write(f"• {explanation}")
+
+        # Display post-schedule overlap warnings if any exist.
+        schedule_warnings = st.session_state.scheduler.detect_conflicts(
+            plan.schedule_items,
+            st.session_state.current_pet.pet_id,
+        )
+        if schedule_warnings:
+            for warning in schedule_warnings:
+                st.warning(warning)
+        else:
+            st.success("Final schedule has no time overlaps for this pet.")
 else:
     st.info("👈 Create an owner, pet, and at least one task first!")

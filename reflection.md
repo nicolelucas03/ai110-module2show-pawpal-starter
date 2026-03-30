@@ -51,13 +51,14 @@ One tradeoff is that the scheduler uses a simple greedy strategy: it ranks tasks
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+I used AI to design and implement some logic throughout the project. Early on, I used it for brainstorming class design and responsibilities so my model could better represent real relationships between owner, pet, task, and schedule entities. During implementation, I used AI to help refactor methods, add recurrence logic, improve scheduling rules, and make the Streamlit app more user-friendly. I also used AI to generate focused tests for sorting, conflict detection, and recurring task behavior.
+
+The most helpful prompts were specific and action-oriented. Prompts like "add a method to filter tasks by pet name," "sort tasks by HH:MM," and "create tests for recurrence and duplicate-time conflicts" produced testable changes. Requests that included expected behavior and concrete inputs/outputs gave the best results.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+One moment I did not accept AI output was when I hit a runtime error in Streamlit (`NameError: ScheduleItem is not defined`). Instead of assuming all generated changes were correct, I reviewed the traceback, checked imports, and confirmed that `ScheduleItem` was referenced in the UI logic but missing from the import block. I then applied a minimal fix and re-validated the file.
+
 
 ---
 
@@ -65,13 +66,27 @@ One tradeoff is that the scheduler uses a simple greedy strategy: it ranks tasks
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+I tested core scheduling and data-management behaviors:
+
+1. Task completion status updates (`pending` to `completed`).
+2. Pet task management (adding tasks increases count).
+3. Sorting correctness for required tasks and chronological HH:MM ordering.
+4. Filtering tasks by pet name (including case-insensitive lookup and empty-name validation).
+5. Recurrence logic (completing daily tasks creates a next occurrence).
+6. Conflict detection and warning behavior for overlapping or duplicate-time tasks.
+7. Non-crashing conflict handling when adding overlapping schedule items.
+
+These tests were important because they cover both correctness and safety.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+I am moderately to highly confident that the scheduler works correctly for the implemented feature set. Core ranking, filtering, recurrence, and conflict-warning behavior are now covered by targeted tests and runtime checks. My Schedule format might not look like expected though. 
+
+If I had more time, I would add edge-case tests for:
+
+1. Weekly recurrence date rollover across months/year boundaries.
+2. Tasks with invalid or missing time formats in mixed datasets.
+3. Multiple pets with same name under one owner.
 
 ---
 
@@ -79,12 +94,12 @@ One tradeoff is that the scheduler uses a simple greedy strategy: it ranks tasks
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The part I am most satisfied with is how the system evolved from a simple class sketch into a more robust scheduler with realistic constraints. I am especially happy with the improvements to data relationships, conflict handling, and test coverage, because those changes made the app both more useful and more reliable.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+In another iteration, I would redesign scheduling to support more advanced optimization and richer constraints (for example, blocked windows, travel/buffer times, and personalized preference weighting). I would also improve persistence so recurring tasks and schedule history are stored across sessions, and I would expand UI controls for editing/reordering tasks directly in Streamlit.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+My key takeaway is that good system design is iterative. Clear models, explicit constraints, and small testable changes matter more than trying to get everything perfect on the first pass. I also learned that AI is most valuable when used with precise prompts and active verification, and not as a replacement for engineering judgment. AI may not always be right, but with the right context, I can get closer to the right direction. 
